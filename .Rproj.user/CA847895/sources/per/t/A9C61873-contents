@@ -31,7 +31,6 @@ from qgis.core import (
     QgsProcessingParameterFeatureSink,
     QgsProcessingParameterFeatureSource,
     QgsProcessingParameterField,
-    QgsProcessingParameterFileDestination,
     QgsProcessingParameterNumber,
     QgsProcessingParameterPoint,
     QgsProcessingParameterVectorLayer,
@@ -41,6 +40,7 @@ from qgis.core import (
     QgsWkbTypes,
     QgsFeatureSink
 )
+
 
 class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
     """
@@ -54,7 +54,7 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
     INPUT_TIME_PER_CREW = 'INPUT_TIME_PER_CREW'
     INPUT_RANK_FIELD = 'INPUT_RANK_FIELD'
     INPUT_RANK_ORDER = 'INPUT_RANK_ORDER'
-    OUTPUT_ROUTES = 'OUTPUT_ROUTES'
+    OUTPUT_VISIT_POINTS = 'OUTPUT_VISIT_POINTS' # MODIFIED CONSTANT
     OUTPUT_CSV = 'OUTPUT_CSV'
 
     def tr(self, string):
@@ -69,11 +69,12 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
     def displayName(self):
         return self.tr('Door Knock Route Planner')
 
+    # MODIFIED - Removed group to place algorithm at provider root
     def group(self):
-        return self.tr('Planning Tools')
+        return ''
 
     def groupId(self):
-        return 'planningtools'
+        return ''
 
     def shortHelpString(self):
         return self.tr("Automates the planning of door-knocking campaigns.")
@@ -112,11 +113,12 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
             options=[self.tr('Ascending'), self.tr('Descending')],
             defaultValue=0, optional=True
         ))
+        # MODIFIED - Changed parameter name and description
         self.addParameter(QgsProcessingParameterFeatureSink(
-            self.OUTPUT_ROUTES, self.tr('Optimized Routes')
+            self.OUTPUT_VISIT_POINTS, self.tr('Visit Points (Ordered)')
         ))
         self.addParameter(QgsProcessingParameterFeatureSink(
-        self.OUTPUT_CSV, self.tr('Door Knock List (Table)')
+            self.OUTPUT_CSV, self.tr('Door Knock List (Table)')
         ))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -161,26 +163,23 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
 
         feedback.pushInfo("Step 4: Preparing final output...")
 
-        # Define fields for the ROUTES output
-        route_fields = QgsFields()
-        route_fields.append(QgsField('crew_id', QVariant.Int))
-        route_fields.append(QgsField('visit_order', QVariant.Int))
+        point_fields = QgsFields()
+        point_fields.append(QgsField('crew_id', QVariant.Int))
+        point_fields.append(QgsField('visit_order', QVariant.Int))
         for field in address_layer.fields():
-            route_fields.append(field)
-        route_fields.append(QgsField('cost', QVariant.Double))
-        
-        # Define fields for the TABLE (CSV) output
+            point_fields.append(field)
+        point_fields.append(QgsField('cost', QVariant.Double))
+
         table_fields = QgsFields()
         table_fields.append(QgsField('crew_id', QVariant.Int))
         table_fields.append(QgsField('visit_order', QVariant.Int))
         for field in address_layer.fields():
             table_fields.append(field)
-        
-        (routes_sink, routes_dest_id) = self.parameterAsSink(
-            parameters, self.OUTPUT_ROUTES, context, route_fields, QgsWkbTypes.LineString, road_layer.crs()
+
+        (points_sink, points_dest_id) = self.parameterAsSink(
+            parameters, self.OUTPUT_VISIT_POINTS, context, point_fields, QgsWkbTypes.Point, address_layer.crs()
         )
-        
-        # Get the sink for the TABLE (CSV) output
+
         (table_sink, table_dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT_CSV, context, table_fields, QgsWkbTypes.NoGeometry, address_layer.crs()
         )
@@ -198,7 +197,6 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                 feedback.pushWarning(f"Crew #{i+1} has no addresses assigned. Skipping.")
                 continue
 
-            # ... (snapping logic remains the same) ...
             start_point_layer = QgsVectorLayer(f"Point?crs={project_crs.authid()}", f"start_point_temp_{i}", "memory")
             provider = start_point_layer.dataProvider()
             feat = QgsFeature()
@@ -219,12 +217,15 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                 snapped_geom.transform(transform)
             snapped_start_point_str = f'{snapped_geom.asPoint().x()},{snapped_geom.asPoint().y()} [{road_crs.authid()}]'
 
-
             route_result = processing.run("qgis:shortestpathpointtolayer", {
                 'INPUT': road_layer, 'STRATEGY': 0, 'START_POINT': snapped_start_point_str,
                 'END_POINTS': crew_addresses, 'OUTPUT': 'memory:'
             }, context=context, feedback=feedback, is_child_algorithm=True)
             temp_route_layer = QgsProcessingUtils.mapLayerFromString(route_result['OUTPUT'], context)
+
+            if not temp_route_layer:
+                feedback.pushWarning(f"Route calculation failed for Crew #{i+1}.")
+                continue
 
             route_features_unsorted = list(temp_route_layer.getFeatures())
             
@@ -234,15 +235,25 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                 feedback.pushWarning(f"Could not sort routes by cost for Crew #{i+1}. The 'cost' field was not found.")
                 continue
 
-            route_features_to_add = []
+            point_features_to_add = []
             table_features_to_add = []
             for visit_order, feature in enumerate(route_features_sorted):
-                # --- Create feature for the ROUTES layer ---
-                route_feature = QgsFeature(route_fields)
-                route_feature.setGeometry(feature.geometry())
-                route_feature.setAttribute('crew_id', i + 1)
-                route_feature.setAttribute('visit_order', visit_order + 1)
-                route_feature.setAttribute('cost', feature['cost'])
+                # --- Create feature for the POINTS layer ---
+                point_feature = QgsFeature(point_fields)
+                
+                line_geom = feature.geometry()
+                if line_geom and line_geom.wkbType() in [QgsWkbTypes.LineString, QgsWkbTypes.MultiLineString]:
+                    # asPolyline() returns a list of points for a single line.
+                    # For MultiLineString, it's a list of lists of points.
+                    # We assume the shortest path is a single line.
+                    points = line_geom.asPolyline()
+                    if points:
+                        end_point = points[-1] 
+                        point_feature.setGeometry(QgsGeometry.fromPointXY(end_point))
+
+                point_feature.setAttribute('crew_id', i + 1)
+                point_feature.setAttribute('visit_order', visit_order + 1)
+                point_feature.setAttribute('cost', feature['cost'])
                 
                 # --- Create feature for the TABLE layer ---
                 table_feature = QgsFeature(table_fields)
@@ -251,17 +262,16 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                 
                 for field in address_layer.fields():
                     field_name = field.name()
-                    route_feature.setAttribute(field_name, feature.attribute(field_name))
+                    point_feature.setAttribute(field_name, feature.attribute(field_name))
                     table_feature.setAttribute(field_name, feature.attribute(field_name))
 
-                route_features_to_add.append(route_feature)
+                point_features_to_add.append(point_feature)
                 table_features_to_add.append(table_feature)
 
-            if route_features_to_add:
-                routes_sink.addFeatures(route_features_to_add)
+            if point_features_to_add:
+                points_sink.addFeatures(point_features_to_add)
                 table_sink.addFeatures(table_features_to_add)
             else:
                 feedback.pushWarning(f"No routes could be calculated for Crew #{i+1}.")
 
-        # The framework will handle file creation and loading. We just return the destination IDs.
-        return {self.OUTPUT_ROUTES: routes_dest_id, self.OUTPUT_CSV: table_dest_id}
+        return {self.OUTPUT_VISIT_POINTS: points_dest_id, self.OUTPUT_CSV: table_dest_id}

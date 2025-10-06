@@ -11,7 +11,7 @@
 """
 
 __author__ = 'Darren Green'
-__date__ = '2025-09-25'
+__date__ = '2025-10-06' # MODIFIED - Updated date
 __copyright__ = '(C) 2025 by Darren Green'
 
 import csv
@@ -20,6 +20,7 @@ from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsDefaultValue,
     QgsFeature,
     QgsField,
     QgsFields,
@@ -38,7 +39,8 @@ from qgis.core import (
     QgsProject,
     QgsVectorLayer,
     QgsWkbTypes,
-    QgsFeatureSink
+    QgsFeatureSink,
+    QgsEditorWidgetSetup # NEW: Import for widget configuration
 )
 
 
@@ -66,7 +68,6 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
     def displayName(self):
         return self.tr('Door Knock Route Planner')
 
-    # MODIFIED - Removed group to place algorithm at provider root
     def group(self):
         return ''
 
@@ -74,7 +75,7 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
         return ''
 
     def shortHelpString(self):
-        return self.tr("Automates the planning of door-knocking campaigns.")
+        return self.tr("Automates the planning of door-knocking campaigns, creating ordered visit points with tracking fields for field data collection.")
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterFeatureSource(
@@ -97,7 +98,6 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber.Integer, defaultValue=1, minValue=1
         ))
         
-        # MODIFIED - Changed parameter name and description
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUTPUT_VISIT_POINTS, self.tr('Visit Points (Ordered)')
         ))
@@ -110,7 +110,7 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
         Main algorithm execution method.
         """
         try:
-            # --- Step 1: Parameter Retrieval and Address Extraction ---
+            # --- Steps 1-3 remain the same ---
             feedback.pushInfo("Step 1: Initializing and extracting addresses...")
 
             polygon_layer = self.parameterAsVectorLayer(parameters, self.INPUT_POLYGON, context)
@@ -133,7 +133,6 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
             if not extracted_layer or extracted_layer.featureCount() == 0:
                 raise QgsProcessingException("No addresses found in the area of interest.")
 
-            # --- Step 2: Divide Addresses into Clusters for Each Crew ---
             feedback.pushInfo(f"Step 2: Dividing {extracted_layer.featureCount()} addresses among {num_crews} crews...")
             
             clustered_result = processing.run("native:kmeansclustering", {
@@ -145,7 +144,6 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
             if not clustered_addresses:
                 raise QgsProcessingException("Failed to create clustered addresses layer from K-Means output.")
 
-            # --- Step 3: Prepare Final Output Layers (Sinks) ---
             feedback.pushInfo("Step 3: Preparing final output layers...")
 
             point_fields = QgsFields()
@@ -154,12 +152,22 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
             for field in address_layer.fields():
                 point_fields.append(field)
             point_fields.append(QgsField('cost', QVariant.Double))
+            point_fields.append(QgsField('Inquiry Date', QVariant.DateTime))
+            point_fields.append(QgsField('Inquirer ID', QVariant.String, len=50))
+            point_fields.append(QgsField('Inquirer Org', QVariant.String, len=100))
+            point_fields.append(QgsField('Outcome', QVariant.String, len=50))
+            point_fields.append(QgsField('Notes', QVariant.String, len=255))
 
             table_fields = QgsFields()
             table_fields.append(QgsField('crew_id', QVariant.Int))
             table_fields.append(QgsField('visit_order', QVariant.Int))
             for field in address_layer.fields():
                 table_fields.append(field)
+            table_fields.append(QgsField('Inquiry Date', QVariant.DateTime))
+            table_fields.append(QgsField('Inquirer ID', QVariant.String, len=50))
+            table_fields.append(QgsField('Inquirer Org', QVariant.String, len=100))
+            table_fields.append(QgsField('Outcome', QVariant.String, len=50))
+            table_fields.append(QgsField('Notes', QVariant.String, len=255))
 
             (points_sink, points_dest_id) = self.parameterAsSink(
                 parameters, self.OUTPUT_VISIT_POINTS, context, point_fields, QgsWkbTypes.Point, address_layer.crs()
@@ -257,6 +265,9 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                         field_name = field.name()
                         point_feature.setAttribute(field_name, feature.attribute(field_name))
                         table_feature.setAttribute(field_name, feature.attribute(field_name))
+                        
+                    point_feature.setAttribute('Outcome', 'Outstanding')
+                    table_feature.setAttribute('Outcome', 'Outstanding')
 
                     point_features_to_add.append(point_feature)
                     table_features_to_add.append(table_feature)
@@ -266,12 +277,45 @@ class DoorKnockPlannerAlgorithm(QgsProcessingAlgorithm):
                     table_sink.addFeatures(table_features_to_add)
                 else:
                     feedback.pushWarning(f"No routes could be calculated for Crew #{i+1}.")
+            
+            # --- Step 5: Configure Visit Points Layer for QField ---
+            feedback.pushInfo("Step 5: Configuring 'Visit Points' layer for field use...")
+            
+            final_points_layer = QgsProcessingUtils.mapLayerFromString(points_dest_id, context)
+            
+            if final_points_layer:
+                outcome_idx = final_points_layer.fields().indexOf('Outcome')
+                
+                if outcome_idx != -1:
+                    # MODIFIED: Use the correct setDefaultValueDefinition method with a QgsDefaultValue object
+                    default_value_definition = QgsDefaultValue("'Outstanding'")
+                    final_points_layer.setDefaultValueDefinition(outcome_idx, default_value_definition)
+                    
+                    # MODIFIED: Correctly format the list for the ValueMap
+                    outcomes_list = [
+                        {'No Person/s home': 'No Person/s home'},
+                        {'Residents Contacted': 'Residents Contacted'},
+                        {'Unable to Locate/Attend Address': 'Unable to Locate/Attend Address'},
+                        {'Outstanding': 'Outstanding'}
+                    ]
+                    
+                    widget_setup = QgsEditorWidgetSetup(
+                        'ValueMap',
+                        {'map': outcomes_list}
+                    )
+                    
+                    final_points_layer.setEditorWidgetSetup(outcome_idx, widget_setup)
+                    feedback.pushInfo("Successfully configured 'Outcome' field with default value and value map.")
+                else:
+                    feedback.pushWarning("Could not find 'Outcome' field to apply configurations.")
+            else:
+                feedback.pushWarning("Could not retrieve final Visit Points layer to configure for QField.")
+
 
             return {self.OUTPUT_VISIT_POINTS: points_dest_id, self.OUTPUT_CSV: table_dest_id}
 
         except Exception as e:
-            # This will catch any unexpected error and report it clearly in the log
             feedback.reportError(f"An unexpected error occurred: {e}", fatalError=True)
             import traceback
             feedback.pushDebugInfo(traceback.format_exc())
-            return {} # Return an empty dictionary to avoid the TypeError
+            return {}

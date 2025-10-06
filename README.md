@@ -86,17 +86,118 @@ highly recommended for the best results.
 
 ### 4. Understanding the Outputs
 
-The tool will create two new layers:
+The tool will create two new layers, now enhanced with fields for
+tracking the status of each visit.
 
 - **Visit Points (Ordered):** A point layer showing the addresses to be
   visited. Its Attribute Table contains `crew_id`, `visit_order`, and
-  `cost` (travel time/distance) fields to guide the crews.
+  `cost` (travel time/distance) fields to guide the crews, along with
+  new fields for data collection.
 - **Door Knock List (Table):** A non-spatial table formatted for easy
   export to a CSV file for use in the field. To export, right-click the
   layer, select `Export > Save Features As...`, and choose “Comma
   Separated Value \[CSV\]”.
 
-### 5. How to Apply a Prioritisation Method
+For details on how to use the new tracking features, see the next
+section.
+
+### 5. Tracking and Field Data Collection
+
+The outputs are now designed to support field data collection and status
+tracking, allowing you to monitor the progress and outcomes of the
+door-knocking campaign.
+
+#### 5.1 New Tracking Fields
+
+Both the `Visit Points` and `Door Knock List` outputs now include the
+following fields:
+
+- **Inquiry Date:** Records the date and time a visit was made.
+- **Inquirer ID:** A text field to store the name or ID of the
+  officer/staff member who conducted the visit.
+- **Inquirer Org:** A text field for the organization or agency of the
+  inquirer (e.g., Police, SES, Council).
+- **Outcome:** A crucial field to record the result of the visit. It
+  defaults to **‘Outstanding’**. The available options are:
+  - `No Person/s home`
+  - `Residents Contacted`
+  - `Unable to Locate/Attend Address`
+  - `Outstanding`
+- **Notes:** A text field for any additional comments or observations
+  from the field crew.
+
+#### 5.2 Using with QField (Recommended for Field Reporting)
+
+The `Visit Points (Ordered)` layer is pre-configured for seamless use
+with the QField mobile app. The ‘Outcome’ field will automatically
+appear as a dropdown menu.
+
+**Workflow:**
+
+1.  **Install QFieldSync:** In QGIS, go to
+    `Plugins > Manage and Install Plugins...` and install the
+    **QFieldSync** plugin.
+2.  **Package for QField:**
+    - Go to `Project > QFieldSync > Package for QField`.
+    - In the dialog, ensure the **Visit Points (Ordered)** layer is
+      checked. You may also want to package a basemap (like
+      OpenStreetMap) for context.
+    - Choose an export directory. This will create a folder containing
+      the project file and data.
+3.  **Transfer to Device:** Copy this exported folder to your mobile
+    device in the location where QField looks for projects (typically
+    `<Internal Storage>/QField/`).
+4.  **Collect Data in the Field:**
+    - Open the project in the QField app.
+    - Tap on a visit point on the map.
+    - Tap the **Edit** (pencil) icon to open the attribute form.
+    - Select the appropriate status from the **Outcome** dropdown and
+      fill in the other tracking fields.
+    - Save your changes.
+5.  **Synchronize Data Back:**
+    - After completing the fieldwork, transfer the project folder back
+      to your computer.
+    - In QGIS, open the project and go to
+      `Project > QFieldSync > Synchronize from QField`.
+    - Point to the modified project folder to pull the changes back into
+      your main QGIS layers. Your `Visit Points` layer will now be
+      updated with the latest status from the field.
+
+#### 5.3 Connecting to a Webform (Advanced)
+
+For organizations that use dedicated web survey platforms (e.g.,
+Survey123, Fulcrum), the `Door Knock List (Table)` can be used as a
+basis for data collection.
+
+The general workflow is to export the `Door Knock List` to a CSV and
+import it into your chosen platform to pre-populate surveys for each
+address. Once data is collected, the results can be exported back out
+and joined to the `Visit Points` layer in QGIS using a unique identifier
+(such as an address ID or a combination of fields).
+
+#### 5.4 Updating Records from a CSV (Placeholder for Future Plugin)
+
+*A future plugin is planned to automate the process of updating the
+master `Visit Points` layer from a completed CSV file. For now, updates
+can be performed using standard QGIS tools.*
+
+**Manual Workflow:**
+
+1.  Export the `Door Knock List (Table)` to CSV and provide it to field
+    crews.
+2.  Once the CSV is filled out and returned, load it back into QGIS via
+    `Layer > Add Layer > Add Delimited Text Layer...`.
+3.  In QGIS, open the **Layer Properties** for your original
+    `Visit Points (Ordered)` layer.
+4.  Go to the **Joins** tab and click the **+** button to add a new
+    join.
+5.  Join your `Visit Points` layer to the newly loaded CSV layer, using
+    a unique field that exists in both (e.g., `ADDRESS_DETAIL_PID` for
+    GNAF data) as the **Join field** and **Target field**.
+6.  The data from the CSV will now be linked to your spatial layer for
+    visualization and analysis.
+
+### 6. How to Apply a Prioritisation Method
 
 The Route Planner works on the specific set of addresses you provide. To
 prioritise visits (e.g., focus on low-lying areas first), you must first
@@ -141,7 +242,7 @@ as a crime scene or a missing person’s Last Known Point (LKP).
     `"distance" = 100`). Run the **Door Knock Route Planner** using this
     filtered layer as your **Address Points** input.
 
-### 6. Important Considerations
+### 7. Important Considerations
 
 - **Performance:** This tool is data-heavy. For best performance, use it
   on a localised area. Running on very large datasets may cause QGIS to

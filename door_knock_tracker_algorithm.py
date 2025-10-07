@@ -15,11 +15,11 @@ __date__ = '2025-10-07'
 __copyright__ = '(C) 2025 by Darren Green'
 
 import csv
-# MODIFIED: QVariant is part of PyQt.QtCore, not qgis.core
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (
     QgsProcessing,
     QgsProcessingAlgorithm,
+    QgsProcessingException,
     QgsProcessingParameterMultipleLayers,
     QgsProcessingParameterFeatureSource,
     QgsProcessingParameterField,
@@ -30,8 +30,7 @@ from qgis.core import (
     QgsFeature,
     QgsVectorLayer,
     QgsFields,
-    QgsField,
-    # MODIFIED: QVariant removed from this list
+    QgsField
 )
 
 class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
@@ -86,12 +85,12 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
         )
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.OUTPUT_NEXT_PRIORITY, self.tr('Next Priority Addresses')
+                self.OUTPUT_NEXT_PRIORITY, self.tr('Updated Visit Points')
             )
         )
         self.addParameter(
             QgsProcessingParameterFileDestination(
-                self.OUTPUT_EXCEPTIONS, self.tr('Validation Exception Report (Optional)'), 'CSV files (*.csv)', optional=True
+                self.OUTPUT_EXCEPTIONS, self.tr('Validation Exception Report'), 'CSV files (*.csv)', optional=True
             )
         )
 
@@ -117,8 +116,7 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
 
         feedback.pushInfo("Step 2: Processing crew CSVs to find best available status...")
         best_status = {}
-        
-        validation_fields = ['Inquiry Date', 'Inquirer ID', 'Inquirer Org']
+        tracking_fields = ['Inquiry Date', 'Inquirer ID', 'Inquirer Org', 'Notes', 'Outcome']
 
         for i, csv_layer in enumerate(csv_layers):
             feedback.pushInfo(f" -> Reading CSV {i+1}/{len(csv_layers)}: {csv_layer.name()}")
@@ -131,13 +129,12 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
                 unique_id = normalize_key(feature.attribute(unique_id_field))
                 if unique_id is None: continue
 
-                new_outcome = feature.attribute('Outcome')
-                new_status = { 'outcome': new_outcome }
-                for field in validation_fields:
+                new_status = {}
+                for field in tracking_fields:
                     new_status[field] = feature.attribute(field) if field in csv_fields else None
                 
                 stored_status = best_status.get(unique_id)
-                if not stored_status or (stored_status.get('outcome', '').strip().lower() != 'completed'):
+                if not stored_status or (stored_status.get('Outcome', '').strip().lower() != 'completed'):
                     best_status[unique_id] = new_status
 
         feedback.pushInfo(f"Found best available status for {len(best_status)} unique properties from CSVs.")
@@ -157,24 +154,37 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
         
         feedback.pushInfo(f"Created a master list of {len(master_features)} unique addresses.")
         
-        feedback.pushInfo("Step 4: Filtering for priority addresses and generating exception report...")
-        features_to_add = []
-        exception_records = []
-        match_count = 0
+        output_fields = QgsFields()
+        for field in original_points_layer.fields():
+            if field.name() == 'Inquiry Date':
+                output_fields.append(QgsField(field.name(), QVariant.String))
+            else:
+                output_fields.append(field)
         
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT_NEXT_PRIORITY, context, original_points_layer.fields(), original_points_layer.wkbType(), original_points_layer.crs())
+        feedback.pushInfo("Step 4: Updating features and generating exception report...")
+        updated_features = []
+        exception_records = []
+        
+        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT_NEXT_PRIORITY, context, output_fields, original_points_layer.wkbType(), original_points_layer.crs())
 
-        for unique_id, feature in master_features.items():
-            status_record = best_status.get(unique_id)
-            is_priority = True
+        for unique_id, original_feature in master_features.items():
+            updated_feature = QgsFeature(output_fields)
+            updated_feature.setGeometry(original_feature.geometry())
             
+            for field in original_feature.fields():
+                 # MODIFIED: Use indexOf() which returns -1 if not found, instead of the incorrect exists()
+                 if output_fields.indexOf(field.name()) != -1:
+                    updated_feature.setAttribute(field.name(), original_feature.attribute(field.name()))
+
+            status_record = best_status.get(unique_id)
+
             if status_record:
-                match_count += 1
-                outcome = status_record.get('outcome')
+                outcome_val = status_record.get('Outcome')
                 
-                if outcome and str(outcome).strip().lower() == 'completed':
+                if outcome_val and str(outcome_val).strip().lower() == 'completed':
                     is_valid_completion = True
                     missing_fields = []
+                    validation_fields = ['Inquiry Date', 'Inquirer ID', 'Inquirer Org']
                     for field in validation_fields:
                         val = status_record.get(field)
                         if val is None or str(val).strip() == '':
@@ -182,26 +192,22 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
                             missing_fields.append(field)
                     
                     if is_valid_completion:
-                        is_priority = False
+                        for field in tracking_fields:
+                            updated_feature.setAttribute(field, status_record.get(field))
                     else:
-                        is_priority = True
+                        updated_feature.setAttribute('Outcome', 'Outstanding')
                         exception_reason = f"Marked 'Completed' but missing data in: {', '.join(missing_fields)}"
-                        exception_records.append([feature.attribute(unique_id_field), exception_reason])
+                        exception_records.append([original_feature.attribute(unique_id_field), exception_reason])
+                else:
+                    for field in tracking_fields:
+                        updated_feature.setAttribute(field, status_record.get(field))
             
-            if is_priority:
-                new_feat = QgsFeature(original_points_layer.fields())
-                new_feat.setGeometry(feature.geometry())
-                for fld in original_points_layer.fields().names():
-                    new_feat.setAttribute(fld, feature.attribute(fld))
-                features_to_add.append(new_feat)
+            updated_features.append(updated_feature)
         
-        feedback.pushInfo(f"Successfully matched status for {match_count} of {len(master_features)} addresses.")
-        if match_count == 0 and len(best_status) > 0:
-            feedback.pushWarning("Warning: No addresses from the CSV files could be matched to the source layers. Please check the 'Unique Address ID Field'.")
-        
-        feedback.pushInfo(f"Found {len(features_to_add)} priority addresses for the next shift.")
-        if features_to_add:
-            sink.addFeatures(features_to_add, QgsFeatureSink.FastInsert)
+        feedback.pushInfo(f"Processed {len(updated_features)} total addresses for the updated layer.")
+
+        if updated_features:
+            sink.addFeatures(updated_features, QgsFeatureSink.FastInsert)
 
         if exception_report_path and exception_records:
             feedback.pushInfo(f"Writing {len(exception_records)} records to exception report...")
@@ -213,4 +219,4 @@ class DoorKnockTrackerAlgorithm(QgsProcessingAlgorithm):
             except Exception as e:
                 feedback.pushWarning(f"Could not write exception report: {e}")
 
-        return {self.OUTPUT_NEXT_PRIORITY: dest_id, self.OUTPUT_EXCEPTIONS: exception_report_path if exception_records else ''}
+        return {self.OUTPUT_NEXT_PRIORITY: dest_id}

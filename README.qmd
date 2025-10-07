@@ -4,13 +4,24 @@ format: gfm
 editor: visual
 ---
 
-# User Guide: Door Knock Route Planner
+> **Disclaimer: Experimental Plugin** This plugin suite is considered experimental. It is designed to demonstrate a potential workflow and should be thoroughly tested through desktop exercises and simulations before being relied upon in a live operational environment.
+
+# User Guide: Door Knock Planner Suite
 
 ### 1. Introduction
 
-The Door Knock Route Planner is a QGIS plugin designed to help plan and organise door-knocking campaigns for disaster management, major investigations, or search and rescue operations.
+The Door Knock Planner is a QGIS plugin suite designed to help plan, execute, and track door-knocking campaigns for disaster management, major investigations, or search and rescue operations.
 
-It takes a list of addresses, divides them among a specified number of field crews, and calculates the most efficient, ordered route for each crew to follow from a central starting point.
+The suite consists of two integrated tools:
+
+1.  **Door Knock Route Planner:** Takes a list of addresses, divides them among field crews, and calculates the most efficient, ordered route for each crew to follow from a central starting point.
+2.  **Door Knock Status Tracker:** Processes completed field data (from CSV files, QField, etc.), merges it with the master address list, and produces an updated status layer for situational awareness and re-planning.
+
+This guide is divided into two parts. Part 1 covers the initial planning with the Route Planner, and Part 2 covers the ongoing tracking and re-planning cycle.
+
+------------------------------------------------------------------------
+
+## Part 1: Initial Planning
 
 ### 2. Before You Begin: Data Preparation
 
@@ -24,127 +35,98 @@ For the planner to work effectively, you need three essential data layers ready 
 
     A.  **Option A - Use Official State Data (Recommended):** For operations in Queensland, Australia, the authoritative **Queensland Roads and Tracks** dataset is recommended, available from [data.qld.gov.au](https://www.data.qld.gov.au/dataset/queensland-roads-and-tracks).
 
-    B.  **Option B - Download from OpenStreetMap (Alternative Method):** If you do not have a road network file, you can download live data from OpenStreetMap directly within QGIS using the **QuickOSM** plugin. **How to use QuickOSM:**
+    B.  **Option B - Download from OpenStreetMap (Alternative Method):** If you do not have a road network file, you can download live data from OpenStreetMap directly within QGIS using the **QuickOSM** plugin. (Instructions on using QuickOSM remain the same...)
 
-        i.  Make sure your Area of Interest or flood model layer is loaded and visible on the map canvas.
-
-        ii. Click the **QuickOSM** plugin icon in the toolbar.
-
-        iii. In the QuickOSM window, go to the **Quick query** tab.
-
-        iv. In the `Key` field, type `highway`. Leave the `Value` field blank to select all road types.
-
-        v.  Click the dropdown menu that says `In` and change it to **Layer Extent**.
-
-        vi. Select your Area of Interest or flood model layer from the adjacent dropdown menu.
-
-        vii. Click **Run query**.
-
-        **Note:** The larger the area, the longer this query will take. The plugin will download all roads within the boundary of your selected layer and add them to your map.
-
-### 3. Step-by-Step: Running the Planner
+### 3. Step-by-Step: Running the Route Planner
 
 1.  **Open the Tool:** In QGIS, open the **Processing Toolbox** panel (`View > Panels > Processing Toolbox`). Find the **Door Knock Planner** provider and double-click the **Door Knock Route Planner** algorithm.
 2.  **Fill in the Parameters:**
     -   **Area of Interest (Polygon):** Select your boundary polygon layer.
     -   **Address Points:** Select your address point layer.
-    -   **Road Network:** Select your road network layer (either from an official file or the `highway` layer downloaded from QuickOSM).
-    -   **Start Location:** Click the `...` button to the right of the field. Your cursor will turn into a crosshair. Click on the map to set the starting point for all crews.
+    -   **Road Network:** Select your road network layer.
+    -   **Start Location:** Click the `...` button and click on the map to set the starting point.
     -   **Number of Available Crews:** Enter the number of teams you have available.
 3.  **Run the Algorithm:** Click the **Run** button.
 
-### 4. Understanding the Outputs
+### 4. Route Planner Outputs
 
-The tool will create two new layers, now enhanced with fields for tracking the status of each visit.
+The Route Planner tool will create two new layers:
 
--   **Visit Points (Ordered):** A point layer showing the addresses to be visited. Its Attribute Table contains `crew_id`, `visit_order`, and `cost` (travel time/distance) fields to guide the crews, along with new fields for data collection.
--   **Door Knock List (Table):** A non-spatial table formatted for easy export to a CSV file for use in the field. To export, right-click the layer, select `Export > Save Features As...`, and choose "Comma Separated Value \[CSV\]".
+-   **Visit Points (Ordered):** A point layer showing the addresses to be visited. It is automatically configured with tracking fields for field data collection.
+-   **Door Knock List (Table):** A non-spatial table formatted for easy export to a CSV file for use in the field.
 
-For details on how to use the new tracking features, see the next section.
+These outputs serve as the input for your field crews and the basis for the tracking workflow described in Part 2.
 
-### 5. Tracking and Field Data Collection
+------------------------------------------------------------------------
 
-The outputs are now designed to support field data collection and status tracking, allowing you to monitor the progress and outcomes of the door-knocking campaign.
+## Part 2: Tracking Progress & Re-Planning
 
-#### 5.1 New Tracking Fields
+### 5. The Door Knock Status Tracker
 
-Both the `Visit Points` and `Door Knock List` outputs now include the following fields:
+This second tool is the key to managing your operation over multiple shifts. Its purpose is to take the data returned from your field crews, merge it with your master address list, and produce a single, updated layer showing the current status of every property.
 
--   **Inquiry Date:** Records the date and time a visit was made.
--   **Inquirer ID:** A text field to store the name or ID of the officer/staff member who conducted the visit.
--   **Inquirer Org:** A text field for the organization or agency of the inquirer (e.g., Police, SES, Council).
--   **Outcome:** A crucial field to record the result of the visit. It defaults to **'Outstanding'**. The available options are:
-    -   `No Person/s home`
-    -   `Residents Contacted`
-    -   `Unable to Locate/Attend Address`
-    -   `Outstanding`
--   **Notes:** A text field for any additional comments or observations from the field crew.
+#### 5.1 Step-by-Step: Running the Status Tracker
 
-#### 5.2 Using with QField (Recommended for Field Reporting)
+1.  **Open the Tool:** In the **Processing Toolbox**, under the **Door Knock Planner** provider, double-click the **Door Knock Status Tracker** algorithm.
+2.  **Fill in the Parameters:**
+    -   **Completed Crew CSV Files:** Select one or more CSV files that have been filled out by your crews.
+    -   **Original Visit Points Layer:** Select the `Visit Points (Ordered)` layer that you created in the previous run of the Route Planner.
+    -   **New Address Layer (Optional):** If you have received new intelligence (e.g., an updated flood map with more addresses), select that point layer here. The tool will add any new addresses to your master list.
+    -   **Unique Address ID Field:** Select the field that contains a unique identifier for each address (e.g., `ADDRESS_DETAIL_PID` or `ADDRESS_LABEL`). This is crucial for correctly matching records.
+    -   **Updated Visit Points:** Specify where to save the new output layer. This will be your new master list.
+    -   **Validation Exception Report (Optional):** Specify a path for a CSV report. The tool will list any addresses marked 'Completed' but missing essential data (Date, ID, or Org) in this file for your review.
+3.  **Run the Algorithm:** Click **Run**. The output will be a new layer, `Updated Visit Points`, containing every address with its latest status.
 
-The `Visit Points (Ordered)` layer is pre-configured for seamless use with the QField mobile app. The 'Outcome' field will automatically appear as a dropdown menu.
+### 6. Managing the Operational Cycle
 
-**Workflow:**
+The Planner and Tracker tools are designed to be used in a continuous cycle of planning, action, and review.
 
-1.  **Install QFieldSync:** In QGIS, go to `Plugins > Manage and Install Plugins...` and install the **QFieldSync** plugin.
-2.  **Package for QField:**
-    -   Go to `Project > QFieldSync > Package for QField`.
-    -   In the dialog, ensure the **Visit Points (Ordered)** layer is checked. You may also want to package a basemap (like OpenStreetMap) for context.
-    -   Choose an export directory. This will create a folder containing the project file and data.
-3.  **Transfer to Device:** Copy this exported folder to your mobile device in the location where QField looks for projects (typically `<Internal Storage>/QField/`).
-4.  **Collect Data in the Field:**
-    -   Open the project in the QField app.
-    -   Tap on a visit point on the map.
-    -   Tap the **Edit** (pencil) icon to open the attribute form.
-    -   Select the appropriate status from the **Outcome** dropdown and fill in the other tracking fields.
-    -   Save your changes.
-5.  **Synchronize Data Back:**
-    -   After completing the fieldwork, transfer the project folder back to your computer.
-    -   In QGIS, open the project and go to `Project > QFieldSync > Synchronize from QField`.
-    -   Point to the modified project folder to pull the changes back into your main QGIS layers. Your `Visit Points` layer will now be updated with the latest status from the field.
+#### 6.1 Workflow for a New Shift
 
-#### 5.3 Connecting to a Webform (Advanced)
+The primary workflow is to use the output of the Tracker to plan the next set of routes.
 
-For organizations that use dedicated web survey platforms (e.g., Survey123, Fulcrum), the `Door Knock List (Table)` can be used as a basis for data collection.
+1.  **Run the Status Tracker:** Follow the steps in section 5.1 to generate the `Updated Visit Points` layer. This layer is your new "single source of truth".
+2.  **Filter for Un-Actioned Addresses:**
+    -   In the QGIS Layers Panel, right-click on your new `Updated Visit Points` layer and select **Filter...**.
+    -   Enter the following expression to show only addresses that still require a visit: `"Outcome" != 'Completed' OR "Outcome" IS NULL`
+    -   Click **OK**. The layer will now only display points that are 'Outstanding', 'No Person Home', etc.
+3.  **Re-Run the Route Planner:** Open the **Door Knock Route Planner** again. For the **Address Points** input, select your filtered `Updated Visit Points` layer. Fill out the other parameters and run the tool to generate new, optimized routes for the next shift.
 
-The general workflow is to export the `Door Knock List` to a CSV and import it into your chosen platform to pre-populate surveys for each address. Once data is collected, the results can be exported back out and joined to the `Visit Points` layer in QGIS using a unique identifier (such as an address ID or a combination of fields).
+#### 6.2 Workflow Diagram
 
-#### 5.4 Updating Records from a CSV (Placeholder for Future Plugin)
+The following diagram illustrates the cyclical workflow for both planning the next shift and incorporating new address data.
 
-*A future plugin is planned to automate the process of updating the master `Visit Points` layer from a completed CSV file. For now, updates can be performed using standard QGIS tools.*
+![](images/clipboard-231901149.png)
 
-**Manual Workflow:**
+### 7. Field Data Collection & Customization
 
-1.  Export the `Door Knock List (Table)` to CSV and provide it to field crews.
-2.  Once the CSV is filled out and returned, load it back into QGIS via `Layer > Add Layer > Add Delimited Text Layer...`.
-3.  In QGIS, open the **Layer Properties** for your original `Visit Points (Ordered)` layer.
-4.  Go to the **Joins** tab and click the **+** button to add a new join.
-5.  Join your `Visit Points` layer to the newly loaded CSV layer, using a unique field that exists in both (e.g., `ADDRESS_DETAIL_PID` for GNAF data) as the **Join field** and **Target field**.
-6.  The data from the CSV will now be linked to your spatial layer for visualization and analysis.
+#### 7.1 Data Collection Strategy
 
-### 6. How to Apply a Prioritisation Method
+> **Important:** The CSV-based workflow for the Status Tracker is provided as a backup method but is prone to human error (typos, incorrect formats). For operational integrity, the **strongly recommended** strategy is to use a direct digital collection method like **QField** or a **Web Form**. These methods feed data directly back into a master source, significantly reducing errors and eliminating the need for manual CSV management.
 
-The Route Planner works on the specific set of addresses you provide. To prioritise visits (e.g., focus on low-lying areas first), you must first filter your address layer *before* running the planner.
+Instructions for using QField and Web Forms are detailed in the sections below.
 
-**Method 1: Prioritising by Elevation (for Flood Events)** This method ranks addresses by their elevation to identify those likely to be impacted first by rising floodwaters.
+#### 7.2 Customizing Survey Questions
 
-1.  **Get Elevation Data:** Use the **Sample raster values** tool from the Processing Toolbox to add elevation data from a DEM (like Mapzen Global Terrain) to your address points.
+The default tracking fields are designed for disaster management. For Search and Rescue (SAR) or Investigations, you may need different fields or options. You can customize the `Visit Points (Ordered)` layer after it has been created by the planner.
 
-2.  **Create Priority Ranks:** Use the **Field Calculator** on the new `Sampled` layer to create a new text field (e.g., `Priority_Rank`). Use a `CASE` statement to group addresses into elevation bands (e.g., '1: 0 - 10m', '2: 11 - 20m', etc.).
+**How to Modify the Form:**
 
-3.  **Filter and Run:** Right-click your `Sampled` layer, choose **Filter...**, and enter an expression to show only the highest-priority addresses (e.g., `"Priority_Rank" = '1: 0 - 10m'`). Then, run the **Door Knock Route Planner**, using this filtered layer as your **Address Points** input.
+1.  In the QGIS Layers Panel, right-click the `Visit Points (Ordered)` layer and select **Properties...**.
+2.  Go to the **Attributes Form** tab.
+3.  **To add or remove 'Outcome' options:**
+    -   Select the `Outcome` field from the "Fields" list.
+    -   The "Widget Type" will be `Value Map`.
+    -   In the options below, you can add, remove (`-`), or re-order the values in the list.
+4.  **To add a new field:**
+    -   The easiest way is to open the layer's **Attribute Table**.
+    -   Click **Toggle Editing** (the pencil icon).
+    -   Click the **New Field** button and define your new column (e.g., a text field called `evidence_collected`).
+    -   Save your layer edits. You can then configure its appearance in the Attributes Form tab.
 
-**Method 2: Prioritising by Proximity (for Investigations or SAR)** This method ranks addresses based on their distance from a key location, such as a crime scene or a missing person's Last Known Point (LKP).
+> **Warning:** If you are using the CSV-based `Door Knock Status Tracker`, you **must not remove** the `'Completed'` and `'Outstanding'` values from the `Outcome` list. The tracker's logic specifically relies on these text values to function correctly. You can add new values, but do not remove these two.
 
-1.  **Create a Point of Interest:** Create a new temporary point layer and add a single point at your location of interest.
-
-2.  **Create Distance Buffers:** Use the **Buffer** tool to create concentric rings (e.g., at 100m, 200m, 300m) around your Point of Interest.
-
-3.  **Assign Proximity Ranks:** Use the **Join attributes by location** tool to transfer the buffer distance attribute to each address point that falls within a ring.
-
-4.  **Filter and Run:** **Filter** the resulting `Joined layer` to show only addresses within a specific distance (e.g., `"distance" = 100`). Run the **Door Knock Route Planner** using this filtered layer as your **Address Points** input.
-
-### 7. Important Considerations
+### 8. Important Considerations
 
 -   **Performance:** This tool is data-heavy. For best performance, use it on a localised area. Running on very large datasets may cause QGIS to freeze.
 -   **Live Events:** The network analysis does **not** account for real-time road closures from flooding or other hazards. During a live event, you may need to break your area into smaller, accessible zones and run the planner for each one.
